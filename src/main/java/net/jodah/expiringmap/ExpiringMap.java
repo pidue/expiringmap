@@ -665,6 +665,46 @@ public class ExpiringMap<K, V> implements ConcurrentMap<K, V> {
     }
   }
 
+    /**
+     * Clear the map, calling the expiration listeners for each entry
+     */
+    public void flush() {
+        writeLock.lock();
+        try {
+            if (asyncExpirationListeners != null || expirationListeners != null) {
+                Map<K, ExpiringEntry<K, V>> entriesToFlush = new HashMap<>(entries);
+                if (asyncExpirationListeners != null) {
+                    for (final ExpirationListener<K, V> listener : asyncExpirationListeners) {
+                        LISTENER_SERVICE.execute(new Runnable() {
+                            public void run() {
+                                for (ExpiringEntry<K, V> entry : entriesToFlush.values()) {
+                                    try {
+                                        listener.expired(entry.key, entry.value);
+                                    } catch (Exception ignoreUserExceptions) {
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+
+                if (expirationListeners != null) {
+                    for (final ExpirationListener<K, V> listener : expirationListeners) {
+                        for (ExpiringEntry<K, V> entry : entriesToFlush.values()) {
+                            try {
+                                listener.expired(entry.key, entry.getValue());
+                            } catch (Exception ignoreUserExceptions) {
+                            }
+                        }
+                    }
+                }
+            }
+            entries.clear();
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
   @Override
   public boolean containsKey(Object key) {
     readLock.lock();
